@@ -1,105 +1,246 @@
-import { LineEdit, ListView } from "std-widgets.slint";
+import { LineEdit, ListView, Palette } from "std-widgets.slint";
+
+export struct ClipRow {
+    title: string,
+    kind: string,
+    detail: string,
+    source: int,
+}
 
 export component MainWindow inherits Window {
-    title: "ClipList";
-    preferred-width: 420px;
-    preferred-height: 540px;
-    background: #f5f5f7;
+    title: "richcut";
+    width: 420px;
+    height: 520px;
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
 
     in-out property <string> search-text: "";
-    in property <[string]> clipboard-items: [];
-    in-out property <string> selected-content: "";
+    in property <[ClipRow]> clipboard-items: [];
+    in-out property <int> selected-index: -1;
 
-    VerticalLayout {
-        padding: 20px;
-        spacing: 14px;
+    property <length> row-height: 58px;
+    property <brush> muted-foreground: Palette.foreground.transparentize(0.45);
+    property <brush> panel-background: Palette.alternate-background;
 
-        Text {
-            text: "Clipboard Hisotry";
-            color: #202124;
-            font-size: 23px;
-            font-weight: 700;
+    callback paste-item(int);
+    callback search-changed(string);
+    callback close-requested();
+    callback quit-requested();
+    callback toggle-picker();
+    callback window-dragged(length, length);
+    callback drag-finished();
+
+    public function focus-search() {
+        search.focus();
+    }
+
+    public function ensure-selected-visible() {
+        if (root.selected-index < 0) {
+            list.viewport-y = 0;
+            return;
         }
+        if (root.selected-index * root.row-height + list.viewport-y < 0) {
+            list.viewport-y = -root.selected-index * root.row-height;
+        } else if ((root.selected-index + 1) * root.row-height + list.viewport-y > list.visible-height) {
+            list.viewport-y = list.visible-height - (root.selected-index + 1) * root.row-height;
+        }
+    }
 
-        LineEdit {
-            placeholder-text: "Search clipboard...";
-            text <=> root.search-text;
-            height: 38px;
+    function move-selection(delta: int) {
+        if (root.clipboard-items.length == 0) {
+            return;
+        }
+        root.selected-index = max(0, min(root.clipboard-items.length - 1, root.selected-index + delta));
+        root.ensure-selected-visible();
+    }
+
+    function paste-selected() {
+        if (root.selected-index >= 0 && root.selected-index < root.clipboard-items.length) {
+            root.paste-item(root.clipboard-items[root.selected-index].source);
+        }
+    }
+
+    FocusScope {
+        focus-on-click: false;
+
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.move-selection(-1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.move-selection(1);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.paste-selected();
+                return accept;
+            }
+            if (event.modifiers.control && event.text == "q") {
+                root.quit-requested();
+                return accept;
+            }
+            reject
         }
 
         Rectangle {
-            background: white;
             border-radius: 12px;
             border-width: 1px;
-            border-color: #e2e2e7;
+            border-color: Palette.border;
+            background: Palette.background;
             clip: true;
 
-            ListView {
-                for item in root.clipboard-items: Rectangle {
-                    height: 58px;
-                    background: row-touch.has-hover ? #f1f1f5 : white;
+            VerticalLayout {
+                padding: 16px;
+                padding-top: 10px;
+                spacing: 12px;
 
-                    VerticalLayout {
-                        padding: 10px;
-                        spacing: 4px;
+                Rectangle {
+                    height: 34px;
+
+                    drag-area := TouchArea {
+                        mouse-cursor: move;
+
+                        moved => {
+                            if (self.pressed) {
+                                root.window-dragged(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                            }
+                        }
+
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.up) {
+                                root.drag-finished();
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: space-between;
 
                         Text {
-                            text: item;
-                            color: #222228;
-                            font-size: 13px;
-                            overflow: elide;
+                            text: "Clipboard History";
+                            color: Palette.foreground;
+                            font-size: 18px;
+                            font-weight: 700;
                             vertical-alignment: center;
                         }
 
                         Text {
-                            text: "Clipboard item";
-                            color: #888890;
-                            font-size: 11px;
+                            text: "⠿";
+                            color: drag-area.has-hover ? Palette.foreground : root.muted-foreground;
+                            font-size: 16px;
+                            vertical-alignment: center;
                         }
-                    }
-
-                    row-touch := TouchArea {
-                        clicked => {
-                            root.selected-content = item;
-                        }
-                    }
-
-                    Rectangle {
-                        x: 10px;
-                        y: parent.height - 1px;
-                        width: parent.width - 20px;
-                        height: 1px;
-                        background: #eeeeef;
                     }
                 }
-            }
-        }
 
-        Text {
-            text: "Preview";
-            color: #202124;
-            font-size: 14px;
-            font-weight: 600;
-        }
+                search := LineEdit {
+                    placeholder-text: "Search clipboard...";
+                    text <=> root.search-text;
+                    height: 36px;
+                    edited(text) => {
+                        root.search-changed(text);
+                    }
+                }
 
-        Rectangle {
-            background: white;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: #e2e2e7;
-            height: 80px;
+                Rectangle {
+                    background: root.panel-background;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Palette.border;
+                    clip: true;
 
-            Text {
-                x: 10px;
-                y: 10px;
-                width: parent.width - 20px;
-                height: parent.height - 20px;
-                text: root.selected-content;
-                color: #44444a;
-                font-size: 12px;
-                wrap: word-wrap;
-                overflow: elide;
-                vertical-alignment: top;
+                    list := ListView {
+                        for item[index] in root.clipboard-items: Rectangle {
+                            height: root.row-height;
+
+                            background: root.selected-index == index
+                                ? Palette.accent-background.transparentize(0.7)
+                                : (row-touch.has-hover ? Palette.foreground.transparentize(0.93) : transparent);
+
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 4px;
+
+                                Text {
+                                    text: item.title;
+                                    color: Palette.foreground;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: item.kind;
+                                    color: root.muted-foreground;
+                                    font-size: 11px;
+                                }
+                            }
+
+                            row-touch := TouchArea {
+                                clicked => {
+                                    root.selected-index = index;
+                                    search.focus();
+                                }
+
+                                double-clicked => {
+                                    root.selected-index = index;
+                                    root.paste-item(item.source);
+                                }
+                            }
+
+                            Rectangle {
+                                x: 10px;
+                                y: parent.height - 1px;
+                                width: parent.width - 20px;
+                                height: 1px;
+                                background: Palette.border;
+                            }
+                        }
+                    }
+
+                    if root.clipboard-items.length == 0: Text {
+                        text: root.search-text == "" ? "Nothing copied yet" : "No matches";
+                        color: root.muted-foreground;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    background: root.panel-background;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: Palette.border;
+                    height: 90px;
+                    clip: true;
+
+                    Text {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text: root.selected-index >= 0 ? root.clipboard-items[root.selected-index].detail : "";
+                        color: Palette.foreground.transparentize(0.2);
+                        font-size: 12px;
+                        wrap: word-wrap;
+                        overflow: elide;
+                        vertical-alignment: top;
+                    }
+                }
+
+                Text {
+                    text: "↑↓ select · Enter paste · Esc close · drag ⠿ to move";
+                    color: root.muted-foreground;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
             }
         }
     }
