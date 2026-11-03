@@ -140,6 +140,15 @@ impl History {
         true
     }
 
+    pub fn clear(&mut self) {
+        if self.entries.is_empty() {
+            return;
+        }
+
+        self.entries.clear();
+        self.save();
+    }
+
     pub fn set_query(&mut self, query: &str) {
         self.query = query.trim().to_lowercase();
     }
@@ -176,6 +185,7 @@ impl History {
     }
 
     fn show_rows(&self, app: &MainWindow, rows: Vec<ClipRow>, selected: Option<usize>) {
+        app.set_history_count(self.entries.len() as i32);
         self.rows.set_vec(rows);
         app.set_selected_index(selected.map_or(-1, |row| row as i32));
         app.invoke_ensure_selected_visible();

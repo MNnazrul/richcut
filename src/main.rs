@@ -55,6 +55,7 @@ impl Picker {
     fn show(&self, app: &MainWindow) {
         *self.previous_app.borrow_mut() = system::frontmost_other_app();
 
+        app.set_confirm_clear(false);
         app.set_search_text("".into());
         {
             let mut history = self.history.borrow_mut();
@@ -123,6 +124,16 @@ impl Picker {
             }
             _ => history.refresh_at_row(&app, usize::try_from(selected_row).unwrap_or(0)),
         }
+    }
+
+    fn clear_all(&self) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+
+        let mut history = self.history.borrow_mut();
+        history.clear();
+        history.refresh(&app, None);
     }
 
     fn drag(&self, dx: f32, dy: f32) {
@@ -312,6 +323,11 @@ fn main() -> Result<(), PlatformError> {
                 picker.delete(source);
             }
         }
+    });
+
+    app.on_clear_all({
+        let picker = picker.clone();
+        move || picker.clear_all()
     });
 
     app.on_quit_requested(|| {
