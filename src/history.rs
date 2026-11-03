@@ -129,13 +129,40 @@ impl History {
         self.save();
     }
 
+    pub fn remove(&mut self, source: usize) -> bool {
+        if source >= self.entries.len() {
+            return false;
+        }
+
+        self.entries.remove(source);
+        self.save();
+
+        true
+    }
+
     pub fn set_query(&mut self, query: &str) {
         self.query = query.trim().to_lowercase();
     }
 
     pub fn refresh(&self, app: &MainWindow, keep_source: Option<usize>) {
-        let rows: Vec<ClipRow> = self
-            .entries
+        let rows = self.visible_rows();
+
+        let selected = keep_source
+            .and_then(|source| rows.iter().position(|row| row.source == source as i32))
+            .or(if rows.is_empty() { None } else { Some(0) });
+
+        self.show_rows(app, rows, selected);
+    }
+
+    pub fn refresh_at_row(&self, app: &MainWindow, row: usize) {
+        let rows = self.visible_rows();
+        let selected = rows.len().checked_sub(1).map(|last| row.min(last));
+
+        self.show_rows(app, rows, selected);
+    }
+
+    fn visible_rows(&self) -> Vec<ClipRow> {
+        self.entries
             .iter()
             .enumerate()
             .filter(|(_, entry)| self.query.is_empty() || entry.search_key.contains(&self.query))
@@ -145,15 +172,12 @@ impl History {
                 detail: entry.detail.clone(),
                 source: source as i32,
             })
-            .collect();
+            .collect()
+    }
 
-        let selected = keep_source
-            .and_then(|source| rows.iter().position(|row| row.source == source as i32))
-            .or(if rows.is_empty() { None } else { Some(0) })
-            .map_or(-1, |row| row as i32);
-
+    fn show_rows(&self, app: &MainWindow, rows: Vec<ClipRow>, selected: Option<usize>) {
         self.rows.set_vec(rows);
-        app.set_selected_index(selected);
+        app.set_selected_index(selected.map_or(-1, |row| row as i32));
         app.invoke_ensure_selected_visible();
     }
 

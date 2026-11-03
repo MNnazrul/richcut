@@ -99,6 +99,32 @@ impl Picker {
         }
     }
 
+    fn delete(&self, source: usize) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+
+        let selected_row = app.get_selected_index();
+        let mut history = self.history.borrow_mut();
+        let selected_source = history.source_at_row(selected_row);
+
+        if !history.remove(source) {
+            return;
+        }
+
+        match selected_source {
+            Some(selected) if selected != source => {
+                let keep = if selected > source {
+                    selected - 1
+                } else {
+                    selected
+                };
+                history.refresh(&app, Some(keep));
+            }
+            _ => history.refresh_at_row(&app, usize::try_from(selected_row).unwrap_or(0)),
+        }
+    }
+
     fn drag(&self, dx: f32, dy: f32) {
         let Some(app) = self.app.upgrade() else {
             return;
@@ -275,6 +301,15 @@ fn main() -> Result<(), PlatformError> {
         move |source| {
             if let Ok(source) = usize::try_from(source) {
                 picker.paste(source);
+            }
+        }
+    });
+
+    app.on_delete_item({
+        let picker = picker.clone();
+        move |source| {
+            if let Ok(source) = usize::try_from(source) {
+                picker.delete(source);
             }
         }
     });
