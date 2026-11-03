@@ -1,16 +1,34 @@
-import { LineEdit, ListView, Palette } from "std-widgets.slint";
+import { LineEdit, ListView, Palette, ScrollView } from "std-widgets.slint";
 
 export struct ClipRow {
     title: string,
-    kind: string,
-    detail: string,
+    subtitle: string,
+    icon: string,
+    time: string,
+    thumbnail: image,
+    has-thumbnail: bool,
     source: int,
+}
+
+export struct PreviewFile {
+    name: string,
+    location: string,
+    missing: bool,
+}
+
+export struct Preview {
+    kind: string,
+    meta: string,
+    text: string,
+    image: image,
+    is-image: bool,
+    files: [PreviewFile],
 }
 
 export component MainWindow inherits Window {
     title: "richcut";
     width: 420px;
-    height: 520px;
+    height: 600px;
     no-frame: true;
     always-on-top: true;
     background: transparent;
@@ -19,11 +37,14 @@ export component MainWindow inherits Window {
     in property <[ClipRow]> clipboard-items: [];
     in-out property <int> selected-index: -1;
     in property <int> history-count: 0;
+    in property <Preview> preview;
     in-out property <bool> confirm-clear: false;
 
-    property <length> row-height: 58px;
+    property <length> row-height: 52px;
     property <brush> muted-foreground: Palette.foreground.transparentize(0.45);
     property <brush> panel-background: Palette.alternate-background;
+    property <color> selection-background: Palette.color-scheme == ColorScheme.dark ? #1d6fe0 : #0a64d6;
+    property <color> selection-foreground: white;
 
     callback paste-item(int);
     callback delete-item(int);
@@ -32,8 +53,51 @@ export component MainWindow inherits Window {
     callback close-requested();
     callback quit-requested();
     callback toggle-picker();
+    callback selection-changed();
+
+    changed selected-index => {
+        root.selection-changed();
+    }
     callback window-dragged(length, length);
     callback drag-finished();
+
+    pure function icon-tint(kind: string) -> color {
+        if (kind == "rich") {
+            return #8b5cf6;
+        }
+        if (kind == "html") {
+            return #f97316;
+        }
+        if (kind == "file") {
+            return #10b981;
+        }
+        if (kind == "folder") {
+            return #eab308;
+        }
+        if (kind == "image") {
+            return #ec4899;
+        }
+        return #3b82f6;
+    }
+
+    pure function icon-for(kind: string) -> image {
+        if (kind == "rich") {
+            return @image-url("icons/rich.svg");
+        }
+        if (kind == "html") {
+            return @image-url("icons/html.svg");
+        }
+        if (kind == "file") {
+            return @image-url("icons/file.svg");
+        }
+        if (kind == "folder") {
+            return @image-url("icons/folder.svg");
+        }
+        if (kind == "image") {
+            return @image-url("icons/image.svg");
+        }
+        return @image-url("icons/text.svg");
+    }
 
     public function focus-search() {
         search.focus();
@@ -224,30 +288,85 @@ export component MainWindow inherits Window {
                     clip: true;
 
                     list := ListView {
-                        for item[index] in root.clipboard-items: Rectangle {
+                        for item[index] in root.clipboard-items: row := Rectangle {
+                            property <bool> selected: root.selected-index == index;
+
                             height: root.row-height;
 
-                            background: root.selected-index == index
-                                ? Palette.accent-background.transparentize(0.7)
-                                : (row-touch.has-hover ? Palette.foreground.transparentize(0.93) : transparent);
+                            Rectangle {
+                                x: 6px;
+                                y: 2px;
+                                width: parent.width - 16px;
+                                height: parent.height - 4px;
+                                border-radius: 8px;
+                                background: row.selected
+                                    ? root.selection-background
+                                    : (row-touch.has-hover ? Palette.foreground.transparentize(0.94) : transparent);
 
-                            VerticalLayout {
-                                padding: 10px;
-                                padding-right: 40px;
-                                spacing: 4px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 10px;
+                                    padding-top: 7px;
+                                    padding-bottom: 7px;
+                                    spacing: 10px;
 
-                                Text {
-                                    text: item.title;
-                                    color: Palette.foreground;
-                                    font-size: 13px;
-                                    overflow: elide;
-                                    vertical-alignment: center;
-                                }
+                                    Rectangle {
+                                        width: 34px;
+                                        height: 34px;
+                                        border-radius: 8px;
+                                        clip: true;
+                                        background: item.has-thumbnail
+                                            ? Palette.foreground.transparentize(0.9)
+                                            : (row.selected ? root.selection-foreground.transparentize(0.82) : root.icon-tint(item.icon).transparentize(0.86));
 
-                                Text {
-                                    text: item.kind;
-                                    color: root.muted-foreground;
-                                    font-size: 11px;
+                                        if item.has-thumbnail: Image {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            source: item.thumbnail;
+                                            image-fit: cover;
+                                        }
+
+                                        if !item.has-thumbnail: Image {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 18px;
+                                            height: 18px;
+                                            source: root.icon-for(item.icon);
+                                            colorize: row.selected ? root.selection-foreground : root.icon-tint(item.icon);
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+
+                                        Text {
+                                            text: item.title;
+                                            color: row.selected ? root.selection-foreground : Palette.foreground;
+                                            font-size: 13px;
+                                            font-weight: 500;
+                                            overflow: elide;
+                                        }
+
+                                        Text {
+                                            text: item.subtitle;
+                                            color: row.selected ? root.selection-foreground.transparentize(0.25) : root.muted-foreground;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: item.time;
+                                        color: row.selected ? root.selection-foreground.transparentize(0.25) : root.muted-foreground;
+                                        font-size: 11px;
+                                        min-width: 26px;
+                                        horizontal-stretch: 0;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                        opacity: row-touch.has-hover ? 0 : 1;
+                                    }
                                 }
                             }
 
@@ -262,20 +381,25 @@ export component MainWindow inherits Window {
                                     root.paste-item(item.source);
                                 }
 
-                                if row-touch.has-hover || root.selected-index == index: Rectangle {
-                                    x: parent.width - 34px;
+                                if row-touch.has-hover: Rectangle {
+                                    x: parent.width - 46px;
                                     y: (parent.height - 24px) / 2;
                                     width: 24px;
                                     height: 24px;
-                                    border-radius: 12px;
-                                    background: delete-touch.has-hover ? Palette.foreground.transparentize(0.85) : transparent;
+                                    border-radius: 6px;
+                                    background: delete-touch.has-hover
+                                        ? (row.selected ? root.selection-foreground.transparentize(0.75) : Palette.foreground.transparentize(0.88))
+                                        : transparent;
 
-                                    Text {
-                                        text: "×";
-                                        color: delete-touch.has-hover ? Palette.foreground : root.muted-foreground;
-                                        font-size: 16px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
+                                    Image {
+                                        x: 6px;
+                                        y: 6px;
+                                        width: 12px;
+                                        height: 12px;
+                                        source: @image-url("icons/close.svg");
+                                        colorize: row.selected
+                                            ? root.selection-foreground
+                                            : (delete-touch.has-hover ? Palette.foreground : root.muted-foreground);
                                     }
 
                                     delete-touch := TouchArea {
@@ -286,23 +410,38 @@ export component MainWindow inherits Window {
                                     }
                                 }
                             }
-
-                            Rectangle {
-                                x: 10px;
-                                y: parent.height - 1px;
-                                width: parent.width - 20px;
-                                height: 1px;
-                                background: Palette.border;
-                            }
                         }
                     }
 
-                    if root.clipboard-items.length == 0: Text {
-                        text: root.search-text == "" ? "Nothing copied yet" : "No matches";
-                        color: root.muted-foreground;
-                        font-size: 13px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    if root.clipboard-items.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+
+                        HorizontalLayout {
+                            alignment: center;
+
+                            Image {
+                                width: 28px;
+                                height: 28px;
+                                source: @image-url("icons/clipboard.svg");
+                                colorize: root.muted-foreground;
+                            }
+                        }
+
+                        Text {
+                            text: root.search-text == "" ? "Nothing copied yet" : "No matches";
+                            color: Palette.foreground;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                        }
+
+                        Text {
+                            text: root.search-text == "" ? "Copy text, images or files to see them here" : "Try a different search";
+                            color: root.muted-foreground;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                        }
                     }
                 }
 
@@ -311,20 +450,105 @@ export component MainWindow inherits Window {
                     border-radius: 10px;
                     border-width: 1px;
                     border-color: Palette.border;
-                    height: 90px;
+                    height: 180px;
                     clip: true;
 
-                    Text {
-                        x: 10px;
-                        y: 8px;
-                        width: parent.width - 20px;
-                        height: parent.height - 16px;
-                        text: root.selected-index >= 0 ? root.clipboard-items[root.selected-index].detail : "";
-                        color: Palette.foreground.transparentize(0.2);
+                    if root.selected-index < 0: Text {
+                        text: "Select an item to preview";
+                        color: root.muted-foreground;
                         font-size: 12px;
-                        wrap: word-wrap;
-                        overflow: elide;
-                        vertical-alignment: top;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    if root.selected-index >= 0: VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            Rectangle {
+                                horizontal-stretch: 0;
+                                border-radius: 4px;
+                                background: Palette.accent-background.transparentize(0.75);
+
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    padding-top: 2px;
+                                    padding-bottom: 2px;
+
+                                    Text {
+                                        text: root.preview.kind;
+                                        color: Palette.foreground;
+                                        font-size: 11px;
+                                        font-weight: 600;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: root.preview.meta;
+                                color: root.muted-foreground;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
+
+                        if root.preview.is-image: Image {
+                            source: root.preview.image;
+                            image-fit: contain;
+                            vertical-stretch: 1;
+                        }
+
+                        if root.preview.files.length > 0: ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: self.visible-width;
+
+                            VerticalLayout {
+                                alignment: start;
+                                padding-right: 12px;
+                                spacing: 8px;
+
+                                for file in root.preview.files: VerticalLayout {
+                                    spacing: 2px;
+
+                                    Text {
+                                        text: file.missing ? file.name + "  (missing)" : file.name;
+                                        color: file.missing ? #d93025 : Palette.foreground;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: file.location;
+                                        color: root.muted-foreground;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !root.preview.is-image && root.preview.files.length == 0: ScrollView {
+                            vertical-stretch: 1;
+                            viewport-width: self.visible-width;
+
+                            VerticalLayout {
+                                padding-right: 12px;
+
+                                Text {
+                                    text: root.preview.text;
+                                    color: Palette.foreground.transparentize(0.1);
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 global-hotkey = "0.9"
+image = { version = "0.25", default-features = false, features = ["tiff", "png"] }
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-application-services = "0.3.2"
@@ -18,3 +19,9 @@ slint = { version = "1.16.1", features = ["raw-window-handle-06"] }
 
 [build-dependencies]
 slint-build = "1.16.1"
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.tiff]
+opt-level = 3

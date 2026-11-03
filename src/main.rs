@@ -23,7 +23,7 @@ use storage::Storage;
 slint::include_modules!();
 
 const PICKER_WIDTH: f64 = 420.0;
-const PICKER_HEIGHT: f64 = 520.0;
+const PICKER_HEIGHT: f64 = 600.0;
 const PASTE_DELAY: Duration = Duration::from_millis(150);
 
 struct Picker {
@@ -123,6 +123,16 @@ impl Picker {
                 history.refresh(&app, Some(keep));
             }
             _ => history.refresh_at_row(&app, usize::try_from(selected_row).unwrap_or(0)),
+        }
+    }
+
+    fn selection_changed(&self) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+
+        if let Ok(history) = self.history.try_borrow() {
+            history.update_preview(&app);
         }
     }
 
@@ -323,6 +333,11 @@ fn main() -> Result<(), PlatformError> {
                 picker.delete(source);
             }
         }
+    });
+
+    app.on_selection_changed({
+        let picker = picker.clone();
+        move || picker.selection_changed()
     });
 
     app.on_clear_all({

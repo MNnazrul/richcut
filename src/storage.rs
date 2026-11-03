@@ -21,6 +21,14 @@ enum StoredEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+struct StoredRecord {
+    #[serde(flatten)]
+    entry: StoredEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copied_at: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct WindowPosition {
     x: f32,
     y: f32,
@@ -71,33 +79,35 @@ impl Storage {
         )
     }
 
-    pub fn load(&self) -> Vec<NativeClipboardContent> {
+    pub fn load(&self) -> Vec<(NativeClipboardContent, Option<u64>)> {
         let Ok(data) = fs::read(self.history_path()) else {
             return Vec::new();
         };
 
-        let Ok(stored) = serde_json::from_slice::<Vec<StoredEntry>>(&data) else {
+        let Ok(stored) = serde_json::from_slice::<Vec<StoredRecord>>(&data) else {
             return Vec::new();
         };
 
         stored
             .into_iter()
-            .filter_map(|entry| match entry {
-                StoredEntry::Text { text, html } => {
-                    Some(NativeClipboardContent::Text { text, html })
-                }
-                StoredEntry::Html { html } => Some(NativeClipboardContent::Html(html)),
-                StoredEntry::Files { paths } => Some(NativeClipboardContent::Files(paths)),
-                StoredEntry::Image { file } => fs::read(self.images_dir().join(file))
-                    .ok()
-                    .map(NativeClipboardContent::ImageByte),
+            .filter_map(|record| {
+                let content = match record.entry {
+                    StoredEntry::Text { text, html } => NativeClipboardContent::Text { text, html },
+                    StoredEntry::Html { html } => NativeClipboardContent::Html(html),
+                    StoredEntry::Files { paths } => NativeClipboardContent::Files(paths),
+                    StoredEntry::Image { file } => NativeClipboardContent::ImageByte(
+                        fs::read(self.images_dir().join(file)).ok()?,
+                    ),
+                };
+
+                Some((content, record.copied_at))
             })
             .collect()
     }
 
     pub fn save<'a>(
         &self,
-        contents: impl Iterator<Item = &'a NativeClipboardContent>,
+        contents: impl Iterator<Item = (&'a NativeClipboardContent, Option<u64>)>,
     ) -> io::Result<()> {
         let images_dir = self.images_dir();
 
@@ -109,7 +119,7 @@ impl Storage {
         let mut stored = Vec::new();
         let mut image_files = HashSet::new();
 
-        for content in contents {
+        for (content, copied_at) in contents {
             let entry = match content {
                 NativeClipboardContent::Text { text, html } => StoredEntry::Text {
                     text: text.clone(),
@@ -133,7 +143,7 @@ impl Storage {
                 NativeClipboardContent::Unknown => continue,
             };
 
-            stored.push(entry);
+            stored.push(StoredRecord { entry, copied_at });
         }
 
         let temp_path = self.dir.join("history.json.tmp");
