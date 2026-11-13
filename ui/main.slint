@@ -47,6 +47,7 @@ export component MainWindow inherits Window {
     property <color> selection-foreground: white;
 
     callback paste-item(int);
+    callback paste-item-plain(int);
     callback delete-item(int);
     callback clear-all();
     callback search-changed(string);
@@ -129,6 +130,12 @@ export component MainWindow inherits Window {
         }
     }
 
+    function paste-selected-plain() {
+        if (root.selected-index >= 0 && root.selected-index < root.clipboard-items.length) {
+            root.paste-item-plain(root.clipboard-items[root.selected-index].source);
+        }
+    }
+
     function request-clear() {
         if (root.confirm-clear) {
             root.confirm-clear = false;
@@ -166,6 +173,10 @@ export component MainWindow inherits Window {
             }
             if (event.text == Key.DownArrow) {
                 root.move-selection(1);
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.Return) {
+                root.paste-selected-plain();
                 return accept;
             }
             if (event.text == Key.Return) {
@@ -553,7 +564,7 @@ export component MainWindow inherits Window {
                 }
 
                 Text {
-                    text: "↑↓ select · Enter paste · ⌘⌫ delete · ⌘⇧⌫ clear all · Esc close";
+                    text: "↑↓ select · Enter paste · ⌘↵ plain text · ⌘⌫ delete · ⌘⇧⌫ clear all · Esc close";
                     color: root.muted-foreground;
                     font-size: 11px;
                     horizontal-alignment: center;

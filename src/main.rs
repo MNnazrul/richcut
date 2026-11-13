@@ -193,11 +193,23 @@ impl Picker {
     }
 
     fn paste(&self, source: usize) {
-        let Some(app) = self.app.upgrade() else {
+        let Some(content) = self.history.borrow().content(source).cloned() else {
             return;
         };
 
-        let Some(content) = self.history.borrow().content(source).cloned() else {
+        self.paste_content(source, content);
+    }
+
+    fn paste_plain(&self, source: usize) {
+        let Some(content) = self.history.borrow().plain_text(source) else {
+            return;
+        };
+
+        self.paste_content(source, content);
+    }
+
+    fn paste_content(&self, source: usize, content: clipboard::NativeClipboardContent) {
+        let Some(app) = self.app.upgrade() else {
             return;
         };
 
@@ -322,6 +334,15 @@ fn main() -> Result<(), PlatformError> {
         move |source| {
             if let Ok(source) = usize::try_from(source) {
                 picker.paste(source);
+            }
+        }
+    });
+
+    app.on_paste_item_plain({
+        let picker = picker.clone();
+        move |source| {
+            if let Ok(source) = usize::try_from(source) {
+                picker.paste_plain(source);
             }
         }
     });

@@ -12,6 +12,7 @@ richcut runs quietly in the background and remembers what you copy: plain text, 
 
 - **Option+V from any app** opens a floating picker next to the mouse pointer. It also appears over full-screen apps and on the current desktop.
 - **Enter pastes** the selected item straight into the app you were in. richcut switches back to that app and sends Cmd+V for you.
+- **Cmd+Enter pastes as plain text**, dropping any formatting, so rich text and HTML land as clean text.
 - **Keeps the original format:**
   - rich text keeps its formatting
   - copied files paste as real files in Finder
@@ -121,6 +122,7 @@ cargo build --release
 | Move the selection | **↑ / ↓** |
 | Search | Just type. The search box always has focus. |
 | Paste the selected item | **Enter**, or double-click a row |
+| Paste as plain text (no formatting) | **Cmd+Enter** |
 | Select without pasting | Click a row |
 | Delete the selected item | **Cmd+Backspace**, or click **×** on a row (hover over it) |
 | Clear all history | Click **Clear all**, then click again within 3 seconds. Or press **Cmd+Shift+Backspace** twice. |
@@ -226,7 +228,8 @@ cargo clippy           # Lint
 - **History is stored as plain text** on disk. Only password-manager copies marked as private are skipped.
 - **All saved images are loaded into memory** at startup, and thumbnails are built the first time the list is shown. A history with many large screenshots uses more memory and opens a bit slower the first time.
 - **Images are captured as TIFF only.** An app that puts only PNG on the clipboard won't be recorded as an image.
-- **HTML-only items** show raw markup in the preview.
+- **HTML-only items** show raw markup in the preview, though Cmd+Enter pastes them as clean text.
+- **Plain-text paste of an image does nothing.** Enter still pastes it as an image.
 - **No app bundle yet:** no launch at login, and no menu bar icon. Quit with Cmd+Q in the picker or Ctrl+C in the terminal.
 - **Only the history logic is tested.** The hotkey, paste and UI paths have no automated tests.
 

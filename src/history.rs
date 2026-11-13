@@ -133,6 +133,21 @@ impl Entry {
             .as_ref()
     }
 
+    fn plain_text(&self) -> Option<NativeClipboardContent> {
+        let text = match &self.content {
+            NativeClipboardContent::Text { text, .. } => text.clone(),
+            NativeClipboardContent::Html(html) => strip_html(html),
+            NativeClipboardContent::Files(paths) => paths.join("\n"),
+            NativeClipboardContent::ImageByte(_) | NativeClipboardContent::Unknown => return None,
+        };
+
+        if text.trim().is_empty() {
+            return None;
+        }
+
+        Some(NativeClipboardContent::Text { text, html: None })
+    }
+
     fn preview(&self) -> Preview {
         let mut preview = Preview {
             kind: self.kind.clone(),
@@ -233,6 +248,10 @@ impl History {
 
     pub fn content(&self, source: usize) -> Option<&NativeClipboardContent> {
         self.entries.get(source).map(|entry| &entry.content)
+    }
+
+    pub fn plain_text(&self, source: usize) -> Option<NativeClipboardContent> {
+        self.entries.get(source)?.plain_text()
     }
 
     pub fn source_at_row(&self, row: i32) -> Option<usize> {
@@ -550,6 +569,117 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
+fn strip_html(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut in_script = false;
+    let mut chars = html.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        match character {
+            '<' => {
+                let is_closing = chars.peek() == Some(&'/');
+                let mut tag = String::new();
+
+                for next in chars.by_ref() {
+                    if next == '>' {
+                        break;
+                    }
+                    tag.push(next);
+                }
+
+                let name = tag
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+
+                if name == "script" || name == "style" {
+                    in_script = !is_closing;
+                } else if !in_script
+                    && is_block_tag(&name)
+                    && !text.is_empty()
+                    && !text.ends_with('\n')
+                {
+                    text.push('\n');
+                }
+            }
+            _ if in_script => {}
+            _ => text.push(character),
+        }
+    }
+
+    text.lines()
+        .map(unescape_entities)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn is_block_tag(name: &str) -> bool {
+    matches!(
+        name,
+        "p" | "div"
+            | "br"
+            | "li"
+            | "tr"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "blockquote"
+            | "pre"
+            | "section"
+            | "article"
+    )
+}
+
+fn unescape_entities(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+
+    while let Some(index) = rest.find('&') {
+        out.push_str(&rest[..index]);
+        rest = &rest[index..];
+
+        let Some(end) = rest.find(';') else {
+            out.push_str(rest);
+            return out;
+        };
+
+        let entity = &rest[1..end];
+        let replaced = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" | "#39" => Some('\''),
+            "nbsp" => Some(' '),
+            _ => entity
+                .strip_prefix("#")
+                .and_then(|digits| digits.parse::<u32>().ok())
+                .and_then(char::from_u32),
+        };
+
+        match replaced {
+            Some(character) => {
+                out.push(character);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+
+    out.push_str(rest);
+    out
+}
+
 fn truncate_chars(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {
         Some((index, _)) => format!("{}…", &text[..index]),
@@ -630,5 +760,86 @@ mod tests {
 
         assert_eq!(history.entries.len(), MAX_HISTORY);
         assert_eq!(contents(&history)[0], "item-0");
+    }
+
+    #[test]
+    fn plain_text_of_rich_text_drops_the_html() {
+        let mut history = history();
+
+        history.push_front(NativeClipboardContent::Text {
+            text: "hello".to_string(),
+            html: Some("<b>hello</b>".to_string()),
+        });
+
+        match history.plain_text(0) {
+            Some(NativeClipboardContent::Text { text, html }) => {
+                assert_eq!(text, "hello");
+                assert_eq!(html, None);
+            }
+            other => panic!("expected plain text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_text_of_html_strips_tags_and_entities() {
+        let mut history = history();
+
+        history.push_front(NativeClipboardContent::Html(
+            "<p>one &amp; two</p><p>three</p>".to_string(),
+        ));
+
+        let Some(NativeClipboardContent::Text { text, .. }) = history.plain_text(0) else {
+            panic!("expected plain text");
+        };
+
+        assert_eq!(text, "one & two\nthree");
+    }
+
+    #[test]
+    fn plain_text_of_files_joins_the_paths() {
+        let mut history = history();
+
+        history.push_front(NativeClipboardContent::Files(vec![
+            "/tmp/a.txt".to_string(),
+            "/tmp/b.txt".to_string(),
+        ]));
+
+        let Some(NativeClipboardContent::Text { text, .. }) = history.plain_text(0) else {
+            panic!("expected plain text");
+        };
+
+        assert_eq!(text, "/tmp/a.txt\n/tmp/b.txt");
+    }
+
+    #[test]
+    fn plain_text_of_an_image_is_none() {
+        let mut history = history();
+
+        history.push_front(NativeClipboardContent::ImageByte(vec![1, 2, 3]));
+
+        assert!(history.plain_text(0).is_none());
+    }
+
+    #[test]
+    fn strip_html_drops_script_and_style_bodies() {
+        assert_eq!(
+            strip_html("<script>alert(1)</script><style>a{}</style>keep"),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn strip_html_handles_br_and_list_items() {
+        assert_eq!(strip_html("a<br>b"), "a\nb");
+    }
+
+    #[test]
+    fn strip_html_leaves_unknown_entities_alone() {
+        assert_eq!(strip_html("a &unknown; b"), "a &unknown; b");
+    }
+
+    #[test]
+    fn strip_html_decodes_numeric_entities() {
+        assert_eq!(strip_html("&#65;&#66;"), "AB");
     }
 }
