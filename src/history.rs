@@ -202,14 +202,26 @@ pub struct History {
 
 impl History {
     pub fn new(rows: Rc<VecModel<ClipRow>>, storage: Option<Storage>) -> Self {
-        let entries = storage
-            .as_ref()
-            .map(Storage::load)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(content, copied_at)| Entry::new(content, copied_at))
-            .take(MAX_HISTORY)
-            .collect();
+        let mut entries: Vec<Entry> = Vec::new();
+
+        for (content, copied_at) in storage.as_ref().map(Storage::load).unwrap_or_default() {
+            let Some(entry) = Entry::new(content, copied_at) else {
+                continue;
+            };
+
+            if entries
+                .iter()
+                .any(|existing| existing.content == entry.content)
+            {
+                continue;
+            }
+
+            entries.push(entry);
+
+            if entries.len() == MAX_HISTORY {
+                break;
+            }
+        }
 
         Self {
             entries,
@@ -231,16 +243,34 @@ impl History {
     }
 
     pub fn push_front(&mut self, content: NativeClipboardContent) -> bool {
-        if self.entries.first().map(|entry| &entry.content) == Some(&content) {
+        if self
+            .entries
+            .first()
+            .map(|entry| entry.content == content)
+            .unwrap_or(false)
+        {
             return false;
         }
 
-        let Some(entry) = Entry::new(content, Some(now_secs())) else {
-            return false;
-        };
+        let now = now_secs();
 
-        self.entries.insert(0, entry);
-        self.entries.truncate(MAX_HISTORY);
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.content == content)
+        {
+            let mut entry = self.entries.remove(index);
+            entry.copied_at = Some(now);
+            self.entries.insert(0, entry);
+        } else {
+            let Some(entry) = Entry::new(content, Some(now)) else {
+                return false;
+            };
+
+            self.entries.insert(0, entry);
+            self.entries.truncate(MAX_HISTORY);
+        }
+
         self.save();
 
         true
@@ -524,5 +554,81 @@ fn truncate_chars(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {
         Some((index, _)) => format!("{}…", &text[..index]),
         None => text.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(value: &str) -> NativeClipboardContent {
+        NativeClipboardContent::Text {
+            text: value.to_string(),
+            html: None,
+        }
+    }
+
+    fn history() -> History {
+        let rows = Rc::new(VecModel::<ClipRow>::default());
+
+        History::new(rows, None)
+    }
+
+    fn contents(history: &History) -> Vec<String> {
+        history
+            .entries
+            .iter()
+            .map(|entry| match &entry.content {
+                NativeClipboardContent::Text { text, .. } => text.clone(),
+                _ => String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn repeated_copy_moves_to_front_without_duplicating() {
+        let mut history = history();
+
+        assert!(history.push_front(text("a")));
+        assert!(history.push_front(text("b")));
+        assert!(history.push_front(text("a")));
+
+        assert_eq!(contents(&history), ["a", "b"]);
+    }
+
+    #[test]
+    fn copying_the_newest_item_again_is_a_no_op() {
+        let mut history = history();
+
+        assert!(history.push_front(text("a")));
+        assert!(!history.push_front(text("a")));
+        assert_eq!(contents(&history), ["a"]);
+    }
+
+    #[test]
+    fn repeated_copy_keeps_the_entry_at_the_front() {
+        let mut history = history();
+
+        for value in ["a", "b", "c", "b", "a", "c"] {
+            history.push_front(text(value));
+        }
+
+        assert_eq!(contents(&history), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn dedupe_respects_the_history_cap() {
+        let mut history = history();
+
+        for index in 0..MAX_HISTORY {
+            history.push_front(text(&format!("item-{index}")));
+        }
+
+        assert_eq!(history.entries.len(), MAX_HISTORY);
+
+        history.push_front(text("item-0"));
+
+        assert_eq!(history.entries.len(), MAX_HISTORY);
+        assert_eq!(contents(&history)[0], "item-0");
     }
 }
